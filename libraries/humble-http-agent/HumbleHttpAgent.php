@@ -7,11 +7,11 @@
  * For environments which do not have these options, it reverts to standard sequential 
  * requests (using file_get_contents())
  * 
- * @version 1.6
- * @date 2015-06-05
+ * @version 1.8
+ * @date 2017-09-25
  * @see http://devel-m6w6.rhcloud.com/mdref/http
  * @author Keyvan Minoukadeh
- * @copyright 2011-2015 Keyvan Minoukadeh
+ * @copyright 2011-2016 Keyvan Minoukadeh
  * @license http://www.gnu.org/licenses/agpl-3.0.html AGPL v3
  */
 
@@ -21,8 +21,9 @@ class HumbleHttpAgent
 	const METHOD_CURL_MULTI = 2;
 	const METHOD_FILE_GET_CONTENTS = 4;
 	//const UA_BROWSER = 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:2.0.1) Gecko/20100101 Firefox/4.0.1';
-	const UA_BROWSER = 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.2 (KHTML, like Gecko) Chrome/15.0.874.92 Safari/535.2';
-	const UA_PHP = 'PHP/5.5';
+	// popular user agents from https://techblog.willshouse.com/2012/01/03/most-common-user-agents/
+	const UA_BROWSER = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36';
+	const UA_PHP = 'PHP/7.1';
 	const REF_GOOGLE = 'http://www.google.co.uk/url?sa=t&source=web&cd=1';
 	
 	protected $requests = array();
@@ -103,20 +104,26 @@ class HumbleHttpAgent
 				)
 			);
 		// HTTP cURL
-		$this->curlOptions = array(
-			CURLOPT_CONNECTTIMEOUT => $this->requestOptions['timeout'],
-			CURLOPT_TIMEOUT => $this->requestOptions['timeout']
+		if ($this->method === self::METHOD_CURL_MULTI) {
+			$this->curlOptions = array(
+				CURLOPT_CONNECTTIMEOUT => $this->requestOptions['timeout'],
+				CURLOPT_TIMEOUT => $this->requestOptions['timeout']
 			);
+		}
 		// Use proxy?
-		if ($this->requestOptions['proxyhost']) {
+		if (isset($this->requestOptions['proxyhost']) && $this->requestOptions['proxyhost']) {
 			// For file_get_contents (see http://stackoverflow.com/a/1336419/407938)			
 			$this->httpContext['http']['proxy'] = 'tcp://'.$this->requestOptions['proxyhost'];
 			$this->httpContext['http']['request_fulluri'] = true;
 			// For cURL (see http://stackoverflow.com/a/9247672/407938)
-			$this->curlOptions[CURLOPT_PROXY] = $this->requestOptions['proxyhost'];
+			if ($this->method === self::METHOD_CURL_MULTI) {
+				$this->curlOptions[CURLOPT_PROXY] = $this->requestOptions['proxyhost'];
+			}
 			if (isset($this->requestOptions['proxyauth'])) {
 				$this->httpContext['http']['header'] .= "Proxy-Authorization: Basic ".base64_encode($this->requestOptions['proxyauth'])."\r\n";
-				$this->curlOptions[CURLOPT_PROXYUSERPWD] = $this->requestOptions['proxyauth'];
+				if ($this->method === self::METHOD_CURL_MULTI) {
+					$this->curlOptions[CURLOPT_PROXYUSERPWD] = $this->requestOptions['proxyauth'];
+				}
 			}
 		}
 	}
@@ -188,6 +195,24 @@ class HumbleHttpAgent
 	
 	public function getMetaRefreshURL($url, $html) {
 		if ($html == '') return false;
+
+		// TODO: parse HTML properly
+		// For now, to deal with cases where meta refresh matches but shouldn't, e.g. CNN's 
+		// <!--[if lte IE 9]><meta http-equiv="refresh" content="1;url=/2.37.2/static/unsupp.html" /><![endif]-->
+		// we do the string replacements in the site config file before looking for the meta refresh
+		if (isset($this->siteConfigBuilder)) {
+			$sconfig = $this->siteConfigBuilder->buildSiteConfig($url);
+			// do string replacements
+			if (!empty($sconfig->find_string)) {
+				if (count($sconfig->find_string) == count($sconfig->replace_string)) {
+					$html = str_replace($sconfig->find_string, $sconfig->replace_string, $html, $_count);
+					//$this->debug("Strings replaced: $_count (find_string and/or replace_string)");
+				} else {
+					//$this->debug('Skipped string replacement - incorrect number of find-replace strings in site config');
+				}
+			}
+		}
+
 		// <meta HTTP-EQUIV="REFRESH" content="0; url=http://www.bernama.com/bernama/v6/newsindex.php?id=943513">
 		if (!preg_match('!<meta http-equiv=["\']?refresh["\']? content=["\']?[0-9];\s*url=["\']?([^"\'>]+)["\']?!i', $html, $match)) {
 			return false;
@@ -205,7 +230,7 @@ class HumbleHttpAgent
 		if (isset($base->path)) $base->path = preg_replace('!//+!', '/', $base->path);
 		if ($absolute = SimplePie_IRI::absolutize($base, $redirect_url)) {
 			$this->debug('Meta refresh redirect found (http-equiv="refresh"), new URL: '.$absolute);
-			return $absolute->get_iri();
+			return $absolute->get_uri();
 		}
 		return false;
 	}	
@@ -242,6 +267,25 @@ class HumbleHttpAgent
 		}
 	}
 	
+	public function convertIdn($url) {
+		if (function_exists('idn_to_ascii')) {
+			if ($host = @parse_url($url, PHP_URL_HOST)) {
+				if (defined('INTL_IDNA_VARIANT_UTS46')) {
+					$puny = idn_to_ascii($host, 0, INTL_IDNA_VARIANT_UTS46);
+				} else {
+					$puny = idn_to_ascii($host);
+				}
+				if ($host != $puny) {
+					$pos = strpos($url, $host);
+					if ($pos !== false) {
+						$url = substr_replace($url, $puny, $pos, strlen($host));
+					}
+				}
+			}
+		}
+		return $url;
+	}
+
 	public function rewriteUrls($url) {
 		foreach ($this->rewriteUrls as $find => $action) {
 			if (strpos($url, $find) !== false) {
@@ -267,10 +311,10 @@ class HumbleHttpAgent
 	
 	public function validateUrl($url) {
 		$url = filter_var($url, FILTER_SANITIZE_URL);
-		$test = filter_var($url, FILTER_VALIDATE_URL, FILTER_FLAG_SCHEME_REQUIRED);
+		$test = filter_var($url, FILTER_VALIDATE_URL);
 		// deal with bug http://bugs.php.net/51192 (present in PHP 5.2.13 and PHP 5.3.2)
 		if ($test === false) {
-			$test = filter_var(strtr($url, '-', '_'), FILTER_VALIDATE_URL, FILTER_FLAG_SCHEME_REQUIRED);
+			$test = filter_var(strtr($url, '-', '_'), FILTER_VALIDATE_URL);
 		}
 		if ($test !== false && $test !== null && preg_match('!^https?://!', $url)) {
 			return $url;
@@ -321,6 +365,7 @@ class HumbleHttpAgent
 						} else {
 							$this->debug("......adding to pool");
 							$req_url = $this->rewriteUrls($url);
+							$req_url = $this->convertIdn($req_url);
 							$req_url = ($this->rewriteHashbangFragment) ? $this->rewriteHashbangFragment($req_url) : $req_url;
 							$req_url = $this->removeFragment($req_url);
 							if (!empty($this->headerOnlyTypes) && !isset($this->requests[$orig]['wrongGuess']) && $this->possibleUnsupportedType($req_url)) {
@@ -501,6 +546,7 @@ class HumbleHttpAgent
 					} else {
 						$this->debug("......adding to pool");
 						$req_url = $this->rewriteUrls($url);
+						$req_url = $this->convertIdn($req_url);
 						$req_url = ($this->rewriteHashbangFragment) ? $this->rewriteHashbangFragment($req_url) : $req_url;
 						$req_url = $this->removeFragment($req_url);
 						if (!empty($this->headerOnlyTypes) && !isset($this->requests[$orig]['wrongGuess']) && $this->possibleUnsupportedType($req_url)) {
@@ -643,6 +689,7 @@ class HumbleHttpAgent
 					$this->debug("Sending request for $url");
 					$this->requests[$orig]['original_url'] = $orig;
 					$req_url = $this->rewriteUrls($url);
+					$req_url = $this->convertIdn($req_url);
 					$req_url = ($this->rewriteHashbangFragment) ? $this->rewriteHashbangFragment($req_url) : $req_url;
 					$req_url = $this->removeFragment($req_url);
 					$httpContext = $this->httpContext;
@@ -842,6 +889,7 @@ class HumbleHttpAgent
 	}
 
 	protected function getCookies($orig, $req_url) {
+		if (!isset($this->cookieJar[$orig])) return null;
 		$jar = $this->cookieJar[$orig];
 		if (!isset($jar)) {
 			return null;

@@ -59,6 +59,19 @@ $options->max_entries = 10;
 // from the output.
 $options->content = 'user';
 
+// HTML5 output
+// ----------------------
+// Full-Text RSS used to rely on libxml to output HTML extracted from
+// a web page. Since version 3.8 we use HTML5-PHP by default.
+// If you prefer the old output, either set this to false or pass &content=1 
+// in the querystring.
+// 
+// Possible values...
+// HTML5 (slower): true
+// libxml (faster): false
+// HTML5 unless user overrides (&content=1): 'user' (default)
+$options->html5_output = 'user';
+
 // Excerpts
 // ----------------------
 // By default Full-Text RSS does not include excerpts in the output.
@@ -242,6 +255,16 @@ $options->allowed_urls = array();
 // Note: for feeds, this option applies to both feed URLs and item URLs within those feeds.
 $options->blocked_urls = array();
 
+// Blocked message
+// -----------------------
+// If a request is blocked outright because of the two rules above, this is the message
+// that is shown. Please note:
+//  * If the input URL is a feed and it's not blocked, feed items that are blocked will
+//    be skipped, and this message will not be shown.
+//  * If the input URL itself is blocked (feed or not), we will output this message instead
+//    of producing a feed.
+$options->blocked_message = '<strong>URL blocked</strong>';
+
 // Key holder(s) only?
 // ----------------------
 // Set this to true if you want to restrict access only to
@@ -309,6 +332,22 @@ $options->max_entries_with_key = 10;
 // 'user' (default) - user must pass &xss=1 in makefulltextfeed.php querystring to enable
 // false - disabled
 $options->xss_filter = 'user';
+
+// Use effective URL in place of item URL
+// ----------------------
+// When we extract content for feed items, we often end up at a different URL than the
+// one in the original feed. This is often a result of URL shorteners or
+// tracking services being used by the feed publisher. We include the final 
+// (effective) URL we reached to get the content inside the dc:identifier field. 
+// If you enable this, we'll also use this URL in place of the original item URL
+// in the new feed we produce.
+// By default, we keep the original item URL but the user can request the effective
+// URL by passing '&use_effective_url' in the querystring.
+// Possible values:
+// * Use effective URL: true
+// * Keep item URL in original feed: false
+// * Keep item URL unless user requests effective URL: 'user' (default)
+$options->favour_effective_url = 'user';
 
 // Favour item titles in feed
 // ----------------------
@@ -484,7 +523,7 @@ $options->cache_cleanup = 100;
 /// DO NOT CHANGE ANYTHING BELOW THIS ///////////
 /////////////////////////////////////////////////
 
-if (!defined('_FF_FTR_VERSION')) define('_FF_FTR_VERSION', '3.5');
+if (!defined('_FF_FTR_VERSION')) define('_FF_FTR_VERSION', '3.8');
 
 if (basename(__FILE__) == 'config.php') {
 	if (file_exists(dirname(__FILE__).'/custom_config.php')) {

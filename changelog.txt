@@ -2,6 +2,62 @@ FiveFilters.org: Full-Text RSS
 http://fivefilters.org/content-only/
 CHANGELOG
 ------------------------------------
+3.8.2 (unreleased)
+ - Removed deprecated PHP 7.2 and 7.3 calls
+ 
+3.8.1 (2017-10-31)
+ - Bug fix: Systems with old ICU library produced an idn_to_ascii() error
+ - Compatibility test file updated to check for DOM extension
+
+3.8 (2017-09-25)
+ - New site config directive: strip_attr: XPath attribute selector (e.g. //img/@srcset) - remove attribute from element
+ - New site config directive: insert_detected_image: yes/no (default yes) - places image in og:image in the body if no other images extracted
+ - Bug fix: Better handling of Internationalized Domain Names (IDNs)
+ - Bug fix: Relative base URLs (<base>) now resolved against page URL
+ - Bug fix: Wrong site config file chosen in certain cases (when wildcard and exact subdomain files available and cached in APCu) 
+ - Bug fix: &apos; HTML entities not converted correctly when parsing with Gumbo PHP
+ - Remove srcset (+ sizes) attributes on img elements if it looks like they only contain relative URLs (browser will use src attribute value instead)
+ - https:// URLs now re-written to sec:// before being submitted to avoid overzealous security software blocking request on some servers - no redirect, only affects newly submitted URLs on index.php
+ - HTML5-PHP library updated
+ - Language Detect library updated
+ - Site config files updated for better extraction
+ - Minimum PHP version is now 5.4. If you must use PHP 5.3, please stick with Full-Text RSS 3.7
+ - Tested with PHP 7.2
+ - Other fixes/improvements
+ 
+3.7 (2017-02-12)
+ - Request HTML5 output using HTML5-PHP - new config option $options->html5_output and new request parameter &content=html5
+ - Improve support for lazy-loading images
+ - Feed preview now displays RTL content correctly (added dir='auto' to feed.xsl)
+ - New request parameter images=0 to remove all images from extracted content
+ - Open Graph and Twitter card metadata now returned in JSON output (no longer in RSS output)
+ - Metadata now returned in extract.php even if article extraction fails
+ - Additional data returned in extract.php for developers: 'domain', 'word_count'
+ - HTML5-PHP library updated
+ - SimplePie library updated (fixes PHP 7.1 issue)
+ - New VPS Puppet script (ubuntu-16.04.pp) - installs PHP 7 and Gumbo PHP extension for faster HTML5 parsing
+ - Bug fix: Language detection now works correctly with PHP 7
+ - Bug fix: Take base href URL into account when following next_page/single_page links (thanks Lukas!)
+ - Bug fix: VPS Puppet script installs new version of PECL HTTP extension that fixes problem when requesting punycode encoded domains
+ - Site config files updated for better extraction
+ - Compatibility test file updated (will tell you if Gumbo PHP will be used)
+ - Tidy won't be used to repair HTML if using an HTML5 parser (unless explicitly requested in site config file - tidy: yes)
+ - New config option $options->blocked_message - set what a user will see when a URL is blocked by Full-Text RSS
+ - Other fixes/improvements
+
+3.6 (2016-02-21)
+ - Insert og:image (if we find one) at the top of the article when no images have been extracted
+ - Additional lazy image load handling - helps preserve more images designed for JS-enabled browsers
+ - Original GUID values from feed items now preserved
+ - New config option favour_effective_url determines if item's effective URL (after redirects) should replace original item URL in feed output
+ - Adding &use_effective_url to querystring will replace original feed item URL with effective URL (unless disabled with config option above)
+ - APCu stats view in admin panel fixed to work with recent versions of APCu
+ - HTML5-PHP library updated
+ - Tested for PHP 7 compatibility
+ - VPS Puppet script (ubuntu-15.10.pp) updated - fixes issue with IDN encodings, among other things. (This is intended for setting up a new Ubuntu 15.10 instance for running Full-Text RSS.)
+ - Site config files updated for better extraction
+ - Other minor fixes/improvements
+
 3.5 (2015-06-13)
  - Open Graph properties og:title, og:type, og:url, og:image, and og:description now returned if found in the page being processed
  - Bug fix: certain XPath expressions weren't being evaluated correctly when HTML5 parsing was enabled
@@ -15,9 +71,6 @@ CHANGELOG
  - Minimum supported PHP version is now 5.3. If you must use PHP 5.2, please download Full-Text RSS 3.4
  - Site config files updated for better extraction
  - Other minor fixes/improvements
-
-3.4.1 (unreleased)
- - Backporting Dave Vasilevsky cookie patch. Fixes issues with certain sites. See https://gist.github.com/fivefilters/0a758b6d64ce4fb5728c
 
 3.4 (2014-09-08)
  - New request parameter: siteconfig lets you submit extraction rules directly in request

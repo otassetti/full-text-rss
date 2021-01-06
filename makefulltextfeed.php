@@ -1,10 +1,10 @@
 <?php
 // Full-Text RSS: Create Full-Text Feeds
 // Author: Keyvan Minoukadeh
-// Copyright (c) 2015 Keyvan Minoukadeh
+// Copyright (c) 2017 Keyvan Minoukadeh
 // License: AGPLv3
-// Version: 3.5
-// Date: 2015-05-29
+// Version: 3.8
+// Date: 2017-09-25
 // More info: http://fivefilters.org/content-only/
 // Help: http://help.fivefilters.org
 
@@ -40,23 +40,6 @@ if (_FF_FTR_MODE === 'simple') {
 	$_REQUEST = array_merge($_GET, $_POST);
 } else {
 	$_REQUEST = $_GET;
-}
-
-// Deal with magic quotes
-if (get_magic_quotes_gpc()) {
-	$process = array(&$_REQUEST);
-	while (list($key, $val) = each($process)) {
-		foreach ($val as $k => $v) {
-			unset($process[$key][$k]);
-			if (is_array($v)) {
-				$process[$key][stripslashes($k)] = $v;
-				$process[] = &$process[$key][stripslashes($k)];
-			} else {
-				$process[$key][stripslashes($k)] = stripslashes($v);
-			}
-		}
-	}
-	unset($process);
 }
 
 // set include path
@@ -129,6 +112,11 @@ if (!$options->enabled) {
 	die('The full-text RSS service is currently disabled'); 
 }
 
+//////////////////////////////////
+// Enable Cross-Origin Resource Sharing (CORS)
+//////////////////////////////////
+if ($options->cors) header('Access-Control-Allow-Origin: *');
+
 ////////////////////////////////
 // Debug mode?
 // See the config file for debug options.
@@ -178,7 +166,9 @@ if (!isset($_REQUEST['url'])) {
 	die('No URL supplied'); 
 }
 $url = trim($_REQUEST['url']);
-if (strtolower(substr($url, 0, 7)) == 'feed://') {
+if (strtolower(substr($url, 0, 6)) == 'sec://') {
+	$url = 'https://'.substr($url, 6);
+} elseif (strtolower(substr($url, 0, 7)) == 'feed://') {
 	$url = 'http://'.substr($url, 7);
 }
 if (!preg_match('!^https?://.+!i', $url)) {
@@ -267,7 +257,7 @@ if (file_exists('custom_init.php')) require 'custom_init.php';
 ///////////////////////////////////////////////
 // Check URL against list of blacklisted URLs
 ///////////////////////////////////////////////
-if (!url_allowed($url)) die('URL blocked');
+if (!url_allowed($url)) die($options->blocked_message);
 
 ///////////////////////////////////////////////
 // Max entries
@@ -298,13 +288,31 @@ if (isset($_REQUEST['links']) && in_array($_REQUEST['links'], array('preserve', 
 }
 
 ///////////////////////////////////////////////
+// Image handling
+///////////////////////////////////////////////
+$images = true;
+if (isset($_REQUEST['images']) && in_array($_REQUEST['images'], array('0', 'remove'))) {
+	$images = false;
+}
+
+///////////////////////////////////////////////
 // Favour item titles in feed?
 ///////////////////////////////////////////////
 $favour_feed_titles = true;
 if ($options->favour_feed_titles == 'user') {
-	$favour_feed_titles = !isset($_REQUEST['use_extracted_title']);
+	$favour_feed_titles = (!isset($_REQUEST['use_extracted_title']) || $_REQUEST['use_extracted_title'] === '0');
 } else {
 	$favour_feed_titles = $options->favour_feed_titles;
+}
+
+///////////////////////////////////////////////
+// Favour effective URL
+///////////////////////////////////////////////
+$favour_effective_url = false;
+if ($options->favour_effective_url == 'user') {
+	$favour_effective_url = (isset($_REQUEST['use_effective_url']) && $_REQUEST['use_effective_url'] !== '0');
+} else {
+	$favour_effective_url = $options->favour_effective_url;
 }
 
 ///////////////////////////////////////////////
@@ -315,6 +323,17 @@ if ($options->content === 'user') {
 		$options->content = false;
 	} else {
 		$options->content = true;
+	}
+}
+
+///////////////////////////////////////////////
+// HTML5 output?
+///////////////////////////////////////////////
+if ($options->html5_output === 'user') {
+	if (isset($_REQUEST['content']) && $_REQUEST['content'] === '1') {
+		$options->html5_output = false;
+	} else {
+		$options->html5_output = true;
 	}
 }
 
@@ -352,7 +371,7 @@ if ($options->detect_language === 'user') {
 	$detect_language = $options->detect_language;
 }
 
-$use_cld = extension_loaded('cld') && (version_compare(PHP_VERSION, '5.3.0') >= 0);
+$use_cld = extension_loaded('cld');
 
 /////////////////////////////////////
 // Check for valid format
@@ -438,11 +457,6 @@ if (!empty($options->proxy_servers)) {
 }
 
 //////////////////////////////////
-// Enable Cross-Origin Resource Sharing (CORS)
-//////////////////////////////////
-if ($options->cors) header('Access-Control-Allow-Origin: *');
-
-//////////////////////////////////
 // Has the HTML been given in the request?
 //////////////////////////////////
 if (isset($_REQUEST['inputhtml']) && _FF_FTR_MODE == 'simple') {
@@ -458,8 +472,7 @@ if (isset($_REQUEST['inputhtml']) && _FF_FTR_MODE == 'simple') {
 //////////////////////////////////
 if ($options->caching) {
 	debug('Caching is enabled...');
-	$cache_id = md5($max.$url.(int)$valid_key.$accept.$links.(int)$favour_feed_titles.(int)$options->content.(int)$options->summary.
-					(int)$xss_filter.(int)$exclude_on_fail.$format.$detect_language.$parser.$user_submitted_config._FF_FTR_MODE);
+	$cache_id = md5($max.$url.(int)$valid_key.$accept.$links.$images.(int)$favour_feed_titles.(int)$options->content.(int)$options->html5_output.(int)$options->summary.(int)$xss_filter.(int)$favour_effective_url.(int)$exclude_on_fail.$format.$detect_language.$parser.$user_submitted_config._FF_FTR_MODE);
 	$check_cache = true;
 	if ($options->apc && $options->smart_cache) {
 		apc_add("cache.$cache_id", 0, $options->cache_time*60);
@@ -544,6 +557,7 @@ SiteConfig::use_apc($options->apc);
 $extractor->fingerprints = $options->fingerprints;
 $extractor->allowedParsers = $options->allowed_parsers;
 $extractor->parserOverride = $parser;
+if (!$images) $extractor->stripImages = true;
 if ($options->user_submitted_config && $user_submitted_config) {
 	$extractor->setUserSubmittedConfig($user_submitted_config);
 }
@@ -623,6 +637,7 @@ if ($accept === 'html' || !$result) {
 		public function get_enclosure($key=0, $prefer=null) { return null; }
 		public function get_enclosures() { return null; }
 		public function get_categories() { return null; }
+		public function get_item_tags($namespace='', $tag='') { return null; }		
 	}
 	$feed = new DummySingleItemFeed($url);
 }
@@ -781,7 +796,7 @@ foreach ($items as $key => $item) {
 			// if user has asked to see parsed HTML, show it and exit.
 			if ($debug_show_parsed_html) {
 				debug("Here's the full HTML after it's been parsed by Full-Text RSS:");
-				die($readability->dom->saveXML($readability->dom->documentElement));
+				die(make_html($readability->dom->documentElement));
 			}
 			// is this a native ad?
 			if ($extract_result && $extractor->isNativeAd()) {
@@ -790,6 +805,8 @@ foreach ($items as $key => $item) {
 					continue; // skip this feed item entry
 				}
 			}
+			$base_url = get_base_url($readability->dom, $effective_url);
+			if (!$base_url) $base_url = $effective_url;
 			$content_block = ($extract_result) ? $extractor->getContent() : null;			
 			$extracted_title = ($extract_result) ? $extractor->getTitle() : '';
 			// Deal with multi-page articles
@@ -803,8 +820,8 @@ foreach ($items as $key => $item) {
 				while ($next_page_url = $extractor->getNextPageUrl()) {
 					debug('--------');
 					debug('Processing next page: '.$next_page_url);
-					// If we've got URL, resolve against $url
-					if ($next_page_url = make_absolute_str($effective_url, $next_page_url)) {
+					// If we've got URL, resolve against $base_url
+					if ($next_page_url = make_absolute_str($base_url, $next_page_url)) {
 						// check it's not what we have already!
 						if (!in_array($next_page_url, $multi_page_urls)) {
 							// it's not, so let's attempt to fetch it
@@ -859,19 +876,24 @@ foreach ($items as $key => $item) {
 	if ($do_content_extraction) {
 		// if we failed to extract content...
 		if (!$extract_result) {
-			if ($exclude_on_fail) {
+			if ($exclude_on_fail && (_FF_FTR_MODE != 'simple')) {
 				debug('Failed to extract, so skipping (due to exclude on fail parameter)');
 				continue; // skip this and move to next item
 			}
-			//TODO: get text sample for language detection
-			$html = $options->error_message;
-			// keep the original item description
-			$html .= $item->get_description();
+			if (_FF_FTR_MODE === 'simple') {
+				$html = '';
+			} else {
+				//TODO: get text sample for language detection
+				$html = $options->error_message;
+				// keep the original item description
+				$html .= $item->get_description();
+			}
 		} else {
 			$readability->clean($content_block, 'select');
 			if ($options->rewrite_relative_urls) {
-				$base_url = get_base_url($readability->dom);
-				if (!$base_url) $base_url = $effective_url;
+				// we've got $base_url already above
+				//$base_url = get_base_url($readability->dom);
+				//if (!$base_url) $base_url = $effective_url;
 				// rewrite URLs
 				make_absolute($base_url, $content_block);
 			}
@@ -897,26 +919,56 @@ foreach ($items as $key => $item) {
 			// convert content block to HTML string
 			// Need to preserve things like body: //img[@id='feature']
 			if (in_array(strtolower($content_block->tagName), array('div', 'article', 'section', 'header', 'footer', 'li', 'td'))) {
-				$html = $content_block->innerHTML;
+				//$html = $content_block->innerHTML;
+				$html = make_html($content_block, true); // true = innerHTML
 			//} elseif (in_array(strtolower($content_block->tagName), array('td', 'li'))) {
 			//	$html = '<div>'.$content_block->innerHTML.'</div>';
 			} else {
-				$html = $content_block->ownerDocument->saveXML($content_block); // essentially outerHTML
+				//$html = $content_block->ownerDocument->saveXML($content_block); // essentially outerHTML
+				$html = make_html($content_block); // outerHTML
 			}
 			//unset($content_block);
 			// post-processing cleanup
 			$html = preg_replace('!<p>[\s\h\v]*</p>!u', '', $html);
+			$html = str_replace('<p>&nbsp;</p>', '', $html);
 			if ($links == 'remove') {
-				$html = preg_replace('!</?a[^>]*>!', '', $html);
+				$html = preg_replace('!<a\s+[^>]*>!', '', $html);
+				$html = preg_replace('!</a>!', '', $html);
 			}
 			// get text sample for language detection
-			$text_sample = strip_tags(substr($html, 0, 500));
+			$_og = $extractor->getOpenGraph();
+			$text_sample = '';
+			if (isset($_og['og:title'])) {
+				$text_sample .= $_og['og:title'];
+			}
+			if (isset($_og['og:description'])) {
+				$text_sample .= ' '.$_og['og:description'];
+			}
+			$text_sample .= mb_substr($content_block->textContent, 0, 3000);
+			unset($_og);
 			$html = make_substitutions($options->message_to_prepend).$html;
 			$html .= make_substitutions($options->message_to_append);
 		}
 	}
 
-	$newitem->addElement('guid', $item->get_permalink(), array('isPermaLink'=>'true'));
+	// guid
+	$_guid = $item->get_permalink();
+	$_ispermalink = 'true';
+	$_g = $item->get_item_tags('', 'guid');
+	if (is_array($_g) && count($_g) > 0) {
+		$_ispermalink = null;
+		$_guid = $_g[0]['data'];
+		if (isset($_g[0]['attribs']) && isset($_g[0]['attribs']['']) && isset($_g[0]['attribs']['']['isPermaLink'])) {
+			$_ispermalink = $_g[0]['attribs']['']['isPermaLink'];
+			if ($_ispermalink !== 'true') $_ispermalink = 'false';
+		}
+	}
+	if (isset($_ispermalink)) {
+		$newitem->addElement('guid', $_guid, array('isPermaLink'=>$_ispermalink));
+	} else {
+		$newitem->addElement('guid', $_guid);
+	}
+	unset($_g, $_guid, $_ispermalink);
 	
 	// filter xss?
 	if ($xss_filter) {
@@ -979,10 +1031,17 @@ foreach ($items as $key => $item) {
 
 	// add open graph
 	if ($opengraph = $extractor->getOpenGraph()) {
-		foreach ($opengraph as $og_prop => $og_val) {
-			$newitem->addElement($og_prop, $og_val);
+		foreach ($opengraph as $_prop => $_val) {
+			$newitem->addElement($_prop, $_val);
 		}
 	}
+	// add Twitter Card
+	if ($twitterCard = $extractor->getTwitterCard()) {
+		foreach ($twitterCard as $_prop => $_val) {
+			$newitem->addElement($_prop, $_val);
+		}
+	}
+	unset($_prop, $_val);
 	
 	// add language
 	if ($detect_language) {
@@ -1007,6 +1066,7 @@ foreach ($items as $key => $item) {
 					$l_result = $l->detect($text_sample, 1);
 					if (count($l_result) > 0) {
 						$language = key($l_result);
+						debug('Language detected: '.$language);
 					}
 				}
 			} catch (Exception $e) {
@@ -1027,6 +1087,7 @@ foreach ($items as $key => $item) {
 		//http://www.siasat.pk/forum/showthread.php?108883-Pakistan-Chowk-by-Rana-Mubashir-–-25th-March-2012-Special-Program-from-Liari-(Karachi)
 		//temporary measure: use utf8_encode()
 		$newitem->addElement('dc:identifier', remove_url_cruft(utf8_encode($effective_url)));
+		if ($favour_effective_url) $newitem->setLink(remove_url_cruft(utf8_encode($effective_url)));
 	} else {
 		$newitem->addElement('dc:identifier', remove_url_cruft($item->get_permalink()));
 	}
@@ -1155,6 +1216,7 @@ function get_self_url() {
 	if (isset($_GET['accept'])) $self .= '&accept='.urlencode($_GET['accept']);		
 	if (isset($_GET['max'])) $self .= '&max='.(int)$_GET['max'];
 	if (isset($_GET['links'])) $self .= '&links='.urlencode($_GET['links']);
+	if (isset($_GET['images'])) $self .= '&images='.urlencode($_GET['images']);
 	if (isset($_GET['exc'])) $self .= '&exc='.urlencode($_GET['exc']);
 	if (isset($_GET['format'])) $self .= '&format='.urlencode($_GET['format']);
 	if (isset($_GET['callback'])) $self .= '&callback='.urlencode($_GET['callback']);	
@@ -1162,6 +1224,7 @@ function get_self_url() {
 	if (isset($_GET['lang'])) $self .= '&lang='.urlencode($_GET['lang']);
 	if (isset($_GET['xss'])) $self .= '&xss';
 	if (isset($_GET['use_extracted_title'])) $self .= '&use_extracted_title';
+	if (isset($_GET['use_effective_url'])) $self .= '&use_effective_url';	
 	if (isset($_GET['content'])) $self .= '&content='.urlencode($_GET['content']);
 	if (isset($_GET['summary'])) $self .= '&summary='.urlencode($_GET['summary']);
 	if (isset($_GET['debug'])) $self .= '&debug';
@@ -1172,11 +1235,26 @@ function get_self_url() {
 }
 
 function validate_url($url) {
+	if (function_exists('idn_to_ascii')) {
+		if ($host = @parse_url($url, PHP_URL_HOST)) {
+			if (defined('INTL_IDNA_VARIANT_UTS46')) {
+				$puny = idn_to_ascii($host, 0, INTL_IDNA_VARIANT_UTS46);
+			} else {
+				$puny = idn_to_ascii($host);
+			}
+			if ($host != $puny) {
+				$pos = strpos($url, $host);
+				if ($pos !== false) {
+					$url = substr_replace($url, $puny, $pos, strlen($host));
+				}
+			}
+		}
+	}
 	$url = filter_var($url, FILTER_SANITIZE_URL);
-	$test = filter_var($url, FILTER_VALIDATE_URL, FILTER_FLAG_SCHEME_REQUIRED);
+	$test = filter_var($url, FILTER_VALIDATE_URL);
 	// deal with bug http://bugs.php.net/51192 (present in PHP 5.2.13 and PHP 5.3.2)
 	if ($test === false) {
-		$test = filter_var(strtr($url, '-', '_'), FILTER_VALIDATE_URL, FILTER_FLAG_SCHEME_REQUIRED);
+		$test = filter_var(strtr($url, '-', '_'), FILTER_VALIDATE_URL);
 	}
 	if ($test !== false && $test !== null && preg_match('!^https?://!i', $url)) {
 		return $url;
@@ -1185,9 +1263,14 @@ function validate_url($url) {
 	}
 }
 
-function get_base_url($dom) {
+function get_base_url($dom, $url=null) {
 	$xpath = new DOMXPath($dom);
-	return @$xpath->evaluate('string(//head/base/@href)', $dom);
+	$base = @$xpath->evaluate('string(//head/base/@href)', $dom);
+	if (!$base) return false;
+	if (isset($url) && !preg_match('!^https?://!i', $base)) {
+		$base = make_absolute_str($url, $base);
+	}
+	return $base;
 }
 
 function is_ssl() {
@@ -1360,7 +1443,7 @@ function make_absolute_attr($base, $e, $attr) {
 		$url = str_replace(' ', '%20', $url);
 		if (!preg_match('!https?://!i', $url)) {
 			if ($absolute = SimplePie_IRI::absolutize($base, $url)) {
-				$e->setAttribute($attr, $absolute);
+				$e->setAttribute($attr, $absolute->get_uri());
 			}
 		}
 	}
@@ -1374,9 +1457,35 @@ function make_absolute_str($base, $url) {
 		return $url;
 	} else {
 		if ($absolute = SimplePie_IRI::absolutize($base, $url)) {
-			return $absolute;
+			return $absolute->get_uri();
 		}
 		return false;
+	}
+}
+function make_html($dom, $inner=false) {
+	global $options;
+	static $html5 = null;
+	if ($options->html5_output) {
+		if ($html5 === null) {
+			$html5 = new Masterminds\HTML5(array('disable_html_ns' => true));
+		}
+		if (!$inner) {
+			return $html5->saveHTML($dom);
+		} else {
+			$_inner = '';
+			if ($dom->hasChildNodes()) {
+				foreach ($dom->childNodes as $child) {
+					$_inner .= $html5->saveHTML($child);
+				}
+			}
+			return $_inner;
+		}
+	} else {
+		if (!$inner) {
+			return $dom->ownerDocument->saveXML($dom);
+		} else {
+			return $dom->innerHTML;
+		}
 	}
 }
 // returns single page response, or false if not found
@@ -1427,8 +1536,10 @@ function get_single_page($item, $html, $url) {
 				}
 			}
 		}
-		// If we've got URL, resolve against $url
-		if (isset($single_page_url) && ($single_page_url = make_absolute_str($url, $single_page_url))) {
+		$base_url = get_base_url($readability->dom, $url);
+		if (!$base_url) $base_url = $url;
+		// If we've got URL, resolve against $base_url
+		if (isset($single_page_url) && ($single_page_url = make_absolute_str($base_url, $single_page_url))) {
 			// check it's not what we have already!
 			if ($single_page_url != $url) {
 				// it's not, so let's try to fetch it...
